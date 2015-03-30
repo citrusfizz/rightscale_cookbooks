@@ -257,7 +257,7 @@ attribute "block_device/ephemeral/file_system_type",
   :recipes => ["block_device::setup_ephemeral"]
 
 # Multiple Block Devices
-device_count = 2
+device_count = 4
 devices = 1.upto(device_count).map { |number| "device#{number}" }
 
 # Set up the block device attributes for each device
