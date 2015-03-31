@@ -6,6 +6,7 @@ require_helper "errors"
 require_helper "os"
 require_helper "input"
 require_helper "rackspace_managed"
+require_helper "monitoring"
 
 # Test specific helpers.
 #
@@ -138,7 +139,7 @@ helpers do
     # Run sys_firewall::setup_rule recipe. Running this recipe will rebuild
     # iptables.
     #
-    run_recipe("sys_firewall::setup_rule", s_one)
+    run_recipe("sys_firewall::setup_rule", server)
 
     # Vefify that conntrack_max value is unchanged (not reset).
     # Obtain the conntrack_max value returned by the sysctl command after
@@ -208,7 +209,7 @@ before "smoke_test", "stop_start", "enable_security_updates_on_running_server",
   server = servers.first
 
   # Get the current cloud.
-  cloud = Cloud.factory
+  cloud = ::RSCookbookHelpers::Cloud.factory
 
   # Set the required credential inputs for Rackspace Managed cloud.
   setup_rackspace_managed_credentials(server) \
@@ -229,6 +230,12 @@ before "smoke_test", "stop_start", "enable_security_updates_on_running_server",
   end
 
   wait_for_server_state(server, "operational")
+
+  # Remove the public IP address tag if the cloud requires SSHing on the private
+  # IP address.
+  #
+  server.remove_tags ["server:public_ip_0=#{server.public_ip}"] if cloud.needs_private_ssh?
+
 end
 
 # Before tests that require security updates enabled.
@@ -240,7 +247,7 @@ before "enable_security_updates_on_boot" do
   server = servers.first
 
   # Get the current cloud.
-  cloud = Cloud.factory
+  cloud = ::RSCookbookHelpers::Cloud.factory
 
   # Set the required credential inputs for Rackspace Managed cloud.
   setup_rackspace_managed_credentials(server) \
@@ -271,7 +278,7 @@ end
 #
 test_case "smoke_test" do
   # Get current cloud.
-  cloud = Cloud.factory
+  cloud = ::RSCookbookHelpers::Cloud.factory
 
   # Single server in deployment.
   server = servers.first
@@ -287,7 +294,7 @@ test_case "smoke_test" do
   end
 
   # Check if the server's basic monitoring is working.
-  check_monitoring
+  check_monitoring(server)
 
   # Reboot to check if functionality works after a reboot on clouds that
   # support reboot.
@@ -309,7 +316,7 @@ test_case "smoke_test" do
   end
 
   # Check if the server's basic monitoring is working.
-  check_monitoring
+  check_monitoring(server)
 
   # Check if security updates are disabled can not be done.  Servers can
   # can be launched with unfrozen repositories.  This case was considered
@@ -325,13 +332,12 @@ end
 #
 test_case "stop_start" do
   # Get the current cloud.
-  cloud = Cloud.factory
+  cloud = ::RSCookbookHelpers::Cloud.factory
 
   # Single server in deployment.
   server = servers.first
 
-  # Only some clouds support stop/start.
-  skip unless cloud.supports_stop_start?(server)
+  skip("cloud does not support stop/start") unless cloud.supports_stop_start?(server)
 
   # Stop server.
   puts "Stopping current server."
@@ -345,11 +351,6 @@ test_case "stop_start" do
   # It takes about a minute for ips to get repopulated.
   wait_for_ip_repopulation(server)
 
-  # Remove the public IP address tag if the cloud requires SSHing on the private
-  # IP address.
-  #
-  server.remove_tags ["server:public_ip_0=#{server.public_ip}"] if cloud.needs_private_ssh?
-
   # Ephemeral, swap file support, and conntrack_max parameter are currently only
   # implemented on the Chef ServerTemplate.
   #
@@ -360,7 +361,7 @@ test_case "stop_start" do
   end
 
   # Check if the server's basic monitoring is working.
-  check_monitoring
+  check_monitoring(server)
 end
 
 # The Base ephemeral_file_system_type test makes sure the file system type
@@ -370,7 +371,7 @@ end
 #
 test_case "ephemeral_file_system_type" do
   # Get the current cloud.
-  cloud = Cloud.factory
+  cloud = ::RSCookbookHelpers::Cloud.factory
 
   # Get the single server in the deployment.
   server = servers.first
@@ -378,7 +379,8 @@ test_case "ephemeral_file_system_type" do
   # Skip this test if the cloud does not support ephemeral drives and if the
   # ServerTemplate is not chef based. Ephemeral drives are supported only on
   # Chef ServerTemplates.
-  skip unless cloud.supports_ephemeral?(server) && is_chef?
+  skip("the ServerTemplate is not chef based") unless is_chef?
+  skip("cloud does not support ephemeral drives") unless cloud.supports_ephemeral?(server)
 
   # Get the OS used by the server
   os = get_operating_system(server)
@@ -431,10 +433,11 @@ test_case "comma_separated_firewall_ports" do
   server = servers.first
 
   # Get the current cloud
-  cloud = Cloud.factory
+  cloud = ::RSCookbookHelpers::Cloud.factory
   # Skip this test if the cloud is a Rackconnect cloud because the firewall is
   # disabled in the server for this cloud.
-  skip unless cloud.supports_sys_firewall? && is_chef?
+  skip("the ServerTemplate is not chef based") unless is_chef?
+  skip("the cloud does not support firewall") unless cloud.supports_sys_firewall?
 
   # Test 1: firewall should have all rules specified in the comma-separated
   # list of input rules.

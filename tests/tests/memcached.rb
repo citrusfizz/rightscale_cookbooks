@@ -17,17 +17,11 @@ helpers do
   end
 end
 
-# When rerunning a test, shutdown all of the servers.
-#
-hard_reset do
-#  stop_all
-end
-
 # Before all of the test cases, launch all of the servers in the deployment.
 #
 before do
   # Get the current cloud
-  cloud = Cloud.factory
+  cloud = ::RSCookbookHelpers::Cloud.factory
 
   # Single server in deployment.
   server = servers.first
